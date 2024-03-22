@@ -33,6 +33,7 @@ where
 
                     println!("Remarkable: We skip the handshake");
 
+                    connector.rfb_version = VncVersion::RFB38;
                     Ok(VncState::Authenticate(connector).try_start().await?)
 /*
 
@@ -62,6 +63,7 @@ where
                     assert!(!security_types.is_empty());
 
                     if security_types.contains(&SecurityType::None) {
+                        println!("None Auth");
                         match connector.rfb_version {
                             VncVersion::RFB33 => {
                                 // If the security-type is 1, for no authentication, the server does not
