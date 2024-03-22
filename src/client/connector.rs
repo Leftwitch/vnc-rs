@@ -31,7 +31,7 @@ where
             match self {
                 VncState::Handshake(mut connector) => {
 
-                    printlin!("Remarkable: We skip the handshake");
+                    println!("Remarkable: We skip the handshake");
 
                       Ok(VncState::Connected(
                         VncClient::new(
