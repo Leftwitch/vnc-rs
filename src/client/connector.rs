@@ -31,26 +31,16 @@ where
             match self {
                 VncState::Handshake(mut connector) => {
 
-                    println!("Remarkable: We skip the handshake");
-
-                    // Read the rfbversion informed by the server
-                    let rfbversion = VncVersion::RFB38;
-                    println!(
-                        "Our version {:?}, server version {:?}",
-                        connector.rfb_version,
-                        rfbversion
-                    );
-                    let rfbversion = if connector.rfb_version < rfbversion {
-                        connector.rfb_version
-                    } else {
-                        rfbversion
-                    };
-
-                    // Record the negotiated rfbversion
-                    connector.rfb_version = rfbversion;
-                    println!("Negotiated rfb version: {:?}", rfbversion);
-                    rfbversion.write(&mut connector.stream).await?;
-                    Ok(VncState::Authenticate(connector).try_start().await?)
+                   
+                    Ok(VncState::Connected(
+                        VncClient::new(
+                            connector.stream,
+                            connector.allow_shared,
+                            connector.pixel_format,
+                            connector.encodings,
+                        )
+                        .await?,
+                    ))
                 }
 
 
