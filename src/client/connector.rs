@@ -34,8 +34,16 @@ where
                     println!("Remarkable: We skip the handshake");
 
                     connector.rfb_version = VncVersion::RFB38;
-                    Ok(VncState::Authenticate(connector).try_start().await?)
-/*
+                    Ok(VncState::Connected(
+                        VncClient::new(
+                            rfb_version: VncVersion::RFB38,
+                            connector.stream,
+                            connector.allow_shared,
+                            connector.pixel_format,
+                            connector.encodings,
+                        )
+                        .await?,
+                    ))/*
 
                     // Read the rfbversion informed by the server
                     let rfbversion = VncVersion::read(&mut connector.stream).await?;
