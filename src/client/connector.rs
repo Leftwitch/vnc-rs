@@ -36,9 +36,10 @@ where
                     connector.rfb_version = VncVersion::RFB38;
                     Ok(VncState::Connected(
                         VncClient::new(
-                            rfb_version: VncVersion::RFB38,
                             connector.stream,
+                            None,
                             connector.allow_shared,
+                            VncVersion::RFB38,
                             connector.pixel_format,
                             connector.encodings,
                         )
