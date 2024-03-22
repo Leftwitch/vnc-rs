@@ -33,7 +33,7 @@ where
 
                     println!("Remarkable: We skip the handshake");
 
-                   Ok(VncState::Authenticate(connector).try_start().await?);
+                    Ok(VncState::Authenticate(connector).try_start().await?)
 /*
 
                     // Read the rfbversion informed by the server
