@@ -35,7 +35,7 @@ where
 
                     // Read the rfbversion informed by the server
                     let rfbversion = VncVersion::RFB38;
-                    trace!(
+                    println!(
                         "Our version {:?}, server version {:?}",
                         connector.rfb_version,
                         rfbversion
@@ -48,7 +48,7 @@ where
 
                     // Record the negotiated rfbversion
                     connector.rfb_version = rfbversion;
-                    trace!("Negotiated rfb version: {:?}", rfbversion);
+                    println!("Negotiated rfb version: {:?}", rfbversion);
                     rfbversion.write(&mut connector.stream).await?;
                     Ok(VncState::Authenticate(connector).try_start().await?)
                 }
