@@ -136,9 +136,9 @@ pub struct PixelFormat {
     pub red_shift: u8,
     pub green_shift: u8,
     pub blue_shift: u8,
-    _padding_1: u8,
-    _padding_2: u8,
-    _padding_3: u8,
+    pub _padding_1: u8,
+    pub _padding_2: u8,
+    pub _padding_3: u8,
 }
 
 impl From<PixelFormat> for Vec<u8> {
