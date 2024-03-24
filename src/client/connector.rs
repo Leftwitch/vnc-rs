@@ -2,27 +2,30 @@ use super::{
     auth::{AuthHelper, AuthResult, SecurityType},
     connection::VncClient,
 };
+use futures::stream;
 use std::future::Future;
 use std::pin::Pin;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tracing::{info, trace};
 
 use crate::{PixelFormat, VncEncoding, VncError, VncVersion};
 
-pub enum VncState<S, F>
+pub enum VncState<S, F, A>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
     F: Future<Output = Result<String, VncError>> + Send + Sync + 'static,
+    A: Future<Output = Result<Vec<u8>, VncError>> + Send + Sync + 'static,
 {
-    Handshake(VncConnector<S, F>),
-    Authenticate(VncConnector<S, F>),
+    Handshake(VncConnector<S, F, A>),
+    Authenticate(VncConnector<S, F, A>),
     Connected(VncClient),
 }
 
-impl<S, F> VncState<S, F>
+impl<S, F, A> VncState<S, F, A>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
     F: Future<Output = Result<String, VncError>> + Send + Sync + 'static,
+    A: Future<Output = Result<Vec<u8>, VncError>> + Send + Sync + 'static,
 {
     pub fn try_start(
         self,
@@ -31,7 +34,13 @@ where
             match self {
                 VncState::Handshake(mut connector) => {
                     // Read the rfbversion informed by the server
-                    let rfbversion = VncVersion::read(&mut connector.stream).await?;
+                    let mut rfbversion = VncVersion::read(&mut connector.stream).await?;
+                    rfbversion = VncVersion::RFB38;
+
+                    println!(
+                        "Our version {:?}, server version {:?}",
+                        connector.rfb_version, rfbversion
+                    );
                     trace!(
                         "Our version {:?}, server version {:?}",
                         connector.rfb_version,
@@ -50,9 +59,11 @@ where
                     Ok(VncState::Authenticate(connector).try_start().await?)
                 }
                 VncState::Authenticate(mut connector) => {
+                    println!("Authenticating");
                     let security_types =
                         SecurityType::read(&mut connector.stream, &connector.rfb_version).await?;
 
+                    println!("Security types: {:?}", security_types);
                     assert!(!security_types.is_empty());
 
                     if security_types.contains(&SecurityType::None) {
@@ -98,35 +109,70 @@ where
                                 // giving the reason, as described in Section 7.1.2.
                                 SecurityType::write(&SecurityType::VncAuth, &mut connector.stream)
                                     .await?;
+
+                                let credential = (connector.auth_method.take().unwrap()).await?;
+
+                                // auth
+                                let auth =
+                                    AuthHelper::read(&mut connector.stream, &credential).await?;
+                                auth.write(&mut connector.stream).await?;
+                                let result = auth.finish(&mut connector.stream).await?;
+                                if let AuthResult::Failed = result {
+                                    if let VncVersion::RFB37 = connector.rfb_version {
+                                        // In VNC Authentication (Section 7.2.2), if the authentication fails,
+                                        // the server sends the SecurityResult message, but does not send an
+                                        // error message before closing the connection.
+                                        return Err(VncError::WrongPassword);
+                                    } else {
+                                        let _ = connector.stream.read_u32().await?;
+                                        let mut err_msg = String::new();
+                                        connector.stream.read_to_string(&mut err_msg).await?;
+                                        return Err(VncError::General(err_msg));
+                                    }
+                                }
+                            }
+                        } else if security_types.contains(&SecurityType::Remarkable2) {
+                            println!("Remarkable2 auth");
+                            SecurityType::write(&SecurityType::Remarkable2, &mut connector.stream)
+                                .await?;
+
+                            println!("Sent Remarkable2 auth");
+
+                            let credential = connector.challenge_method.take().unwrap().await?;
+
+                            println!("Got credential: {:?}", credential);
+                            let stream = &mut connector.stream;
+                            stream.write_u32(credential.len() as u32).await?;
+                            stream.write_all(&credential).await?;
+
+                            let result: AuthResult = stream.read_u32().await?.into();
+
+                            println!("Auth result: {:?}", result);
+
+                            stream.read_u8().await?; // padding
+
+                            if let AuthResult::Failed = result {
+                                println!("Wrong password");
+                                if let VncVersion::RFB37 = connector.rfb_version {
+                                    // In VNC Authentication (Section 7.2.2), if the authentication fails,
+                                    // the server sends the SecurityResult message, but does not send an
+                                    // error message before closing the connection.
+                                    return Err(VncError::WrongPassword);
+                                } else {
+                                    let _ = connector.stream.read_u32().await?;
+                                    let mut err_msg = String::new();
+                                    connector.stream.read_to_string(&mut err_msg).await?;
+                                    return Err(VncError::General(err_msg));
+                                }
                             }
                         } else {
-                            let msg = "Security type apart from Vnc Auth has not been implemented";
+                            let msg = "Security type apart from Vnc and Remarkable Auth has not been implemented";
                             return Err(VncError::General(msg.to_owned()));
                         }
 
                         // get password
-                        if connector.auth_methond.is_none() {
+                        if connector.auth_method.is_none() {
                             return Err(VncError::NoPassword);
-                        }
-
-                        let credential = (connector.auth_methond.take().unwrap()).await?;
-
-                        // auth
-                        let auth = AuthHelper::read(&mut connector.stream, &credential).await?;
-                        auth.write(&mut connector.stream).await?;
-                        let result = auth.finish(&mut connector.stream).await?;
-                        if let AuthResult::Failed = result {
-                            if let VncVersion::RFB37 = connector.rfb_version {
-                                // In VNC Authentication (Section 7.2.2), if the authentication fails,
-                                // the server sends the SecurityResult message, but does not send an
-                                // error message before closing the connection.
-                                return Err(VncError::WrongPassword);
-                            } else {
-                                let _ = connector.stream.read_u32().await?;
-                                let mut err_msg = String::new();
-                                connector.stream.read_to_string(&mut err_msg).await?;
-                                return Err(VncError::General(err_msg));
-                            }
                         }
                     }
                     info!("auth done, client connected");
@@ -156,23 +202,26 @@ where
 }
 
 /// Connection Builder to setup a vnc client
-pub struct VncConnector<S, F>
+pub struct VncConnector<S, F, A>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
     F: Future<Output = Result<String, VncError>> + Send + Sync + 'static,
+    A: Future<Output = Result<Vec<u8>, VncError>> + Send + Sync + 'static,
 {
     stream: S,
-    auth_methond: Option<F>,
+    auth_method: Option<F>,
+    challenge_method: Option<A>,
     rfb_version: VncVersion,
     allow_shared: bool,
     pixel_format: Option<PixelFormat>,
     encodings: Vec<VncEncoding>,
 }
 
-impl<S, F> VncConnector<S, F>
+impl<S, F, A> VncConnector<S, F, A>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
     F: Future<Output = Result<String, VncError>> + Send + Sync + 'static,
+    A: Future<Output = Result<Vec<u8>, VncError>> + Send + Sync + 'static,
 {
     /// To new a vnc client configuration with stream `S`
     ///
@@ -204,7 +253,8 @@ where
     pub fn new(stream: S) -> Self {
         Self {
             stream,
-            auth_methond: None,
+            auth_method: None,
+            challenge_method: None,
             allow_shared: true,
             rfb_version: VncVersion::RFB38,
             pixel_format: None,
@@ -252,7 +302,12 @@ where
     /// The future won't be polled if the sever doesn't apply any password protections to the session
     ///
     pub fn set_auth_method(mut self, auth_callback: F) -> Self {
-        self.auth_methond = Some(auth_callback);
+        self.auth_method = Some(auth_callback);
+        self
+    }
+
+    pub fn set_challenge_method(mut self, auth_callback: A) -> Self {
+        self.challenge_method = Some(auth_callback);
         self
     }
 
@@ -310,7 +365,7 @@ where
 
     /// Complete the client configuration
     ///
-    pub fn build(self) -> Result<VncState<S, F>, VncError> {
+    pub fn build(self) -> Result<VncState<S, F, A>, VncError> {
         if self.encodings.is_empty() {
             return Err(VncError::NoEncoding);
         }

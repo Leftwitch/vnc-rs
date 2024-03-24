@@ -18,13 +18,14 @@ pub(super) enum SecurityType {
     GtkVncSasl = 20,
     Md5Hash = 21,
     ColinDeanXvp = 22,
+    Remarkable2 = 100,
 }
 
 impl TryFrom<u8> for SecurityType {
     type Error = VncError;
     fn try_from(num: u8) -> Result<Self, Self::Error> {
         match num {
-            0 | 1 | 2 | 5 | 6 | 16 | 17 | 18 | 19 | 20 | 21 | 22 => {
+            0 | 1 | 2 | 5 | 6 | 16 | 17 | 18 | 19 | 20 | 21 | 22 | 100 => {
                 Ok(unsafe { std::mem::transmute(num) })
             }
             invalid => Err(VncError::InvalidSecurityTyep(invalid)),
@@ -90,6 +91,7 @@ impl SecurityType {
     }
 }
 
+#[derive(Debug)]
 #[allow(dead_code)]
 #[repr(u32)]
 pub(super) enum AuthResult {

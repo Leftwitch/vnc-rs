@@ -342,6 +342,7 @@ where
     .await?;
 
     let pixel_format = PixelFormat::read(stream).await?;
+    println!("Server pixel format: {:#?}", pixel_format);
     if pf.is_none() {
         output_func(VncEvent::SetPixelFormat(pixel_format)).await?;
         let _ = pf.insert(pixel_format);
